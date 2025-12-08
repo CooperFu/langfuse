@@ -97,7 +97,7 @@ async function getDatasetByName(props: {
 
 /**
  * Converts a DatasetItem to Domain types with optional IO fields and dataset name.
- * Automatically excludes version columns (validFrom, isDeleted).
+ * Automatically excludes internal version columns (sysId, validFrom, isDeleted) from domain types.
  */
 function toDomainType<
   IncludeIO extends boolean = true,
@@ -114,7 +114,6 @@ function toDomainType<
     ? DatasetItemDomainWithoutIO & { datasetName: string }
     : DatasetItemDomainWithoutIO {
   const base: DatasetItemDomainWithoutIO = {
-    sysId: item.sysId,
     id: item.id,
     projectId: item.projectId,
     datasetId: item.datasetId,
@@ -123,6 +122,7 @@ function toDomainType<
     sourceObservationId: item.sourceObservationId ?? null,
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
+    validFrom: item.validFrom,
   };
 
   // Add IO fields if requested (or if not specified and they're present)
@@ -205,10 +205,7 @@ export async function createDatasetItem(props: {
   validateOpts: {
     normalizeUndefinedToNull?: boolean;
   };
-}): Promise<
-  | { success: true; datasetItem: Omit<DatasetItemDomain, "sysId"> }
-  | PayloadError
-> {
+}): Promise<{ success: true; datasetItem: DatasetItemDomain } | PayloadError> {
   // Delegate to createManyDatasetItems with single item
   const result = await createManyDatasetItems({
     projectId: props.projectId,
@@ -239,7 +236,7 @@ export async function createDatasetItem(props: {
     ...result.datasetItems[0],
     createdAt: new Date(),
     updatedAt: new Date(),
-  } as Omit<DatasetItemDomain, "sysId">;
+  } as DatasetItemDomain;
 
   return { success: true, datasetItem };
 }
@@ -340,9 +337,10 @@ export async function upsertDatasetItem(
       if (existingItem) {
         const res = await prisma.datasetItem.update({
           where: {
-            sysId_projectId: {
-              sysId: existingItem.sysId,
+            id_projectId_validFrom: {
+              id: existingItem.id,
               projectId: props.projectId,
+              validFrom: existingItem.validFrom,
             },
             datasetId: dataset.id,
           },
@@ -409,8 +407,9 @@ export async function deleteDatasetItem(props: {
     [Implementation.STATEFUL]: async () => {
       await prisma.datasetItem.delete({
         where: {
-          sysId_projectId: {
-            sysId: item.sysId,
+          id_projectId_validFrom: {
+            id: item.id,
+            validFrom: item.validFrom,
             projectId: props.projectId,
           },
         },
@@ -666,8 +665,8 @@ export type ItemWithDatasetName<T> = T & {
  * Raw database row for getting latest dataset items from dataset_items table
  */
 type QueryGetLatestDatasetItemRow = {
-  sys_id: string;
   id: string;
+  valid_from: Date;
   project_id: string;
   dataset_id: string;
   input?: any;
@@ -1015,7 +1014,7 @@ function buildDatasetItemsLatestQuery(
       SELECT DISTINCT ON (di.id, di.project_id)
         di.id,
         di.project_id,
-        di.sys_id,
+        di.valid_from,
         di.dataset_id,
         ${ioFieldsCTE}
         di.source_trace_id,
@@ -1033,7 +1032,7 @@ function buildDatasetItemsLatestQuery(
     SELECT
       di.id,
       di.project_id,
-      di.sys_id,
+      di.valid_from,
       di.dataset_id,
       ${ioFieldsOuter}
       di.source_trace_id,
@@ -1076,7 +1075,7 @@ function buildDatasetItemsLatestCountQuery(
     WITH latest_items AS (
       SELECT DISTINCT ON (di.id, di.project_id)
         di.id,
-        di.sys_id,
+        di.valid_from,
         di.project_id,
         di.dataset_id,
         di.input,
@@ -1148,7 +1147,6 @@ function convertLatestRowToDomain<
     ? DatasetItemDomainWithoutIO & { datasetName: string }
     : DatasetItemDomainWithoutIO {
   const base: DatasetItemDomainWithoutIO = {
-    sysId: row.sys_id,
     id: row.id,
     projectId: row.project_id,
     datasetId: row.dataset_id,
@@ -1157,6 +1155,7 @@ function convertLatestRowToDomain<
     status: row.status ?? DatasetStatus.ACTIVE,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    validFrom: row.valid_from,
   };
 
   const withIO = includeIO
@@ -1312,7 +1311,7 @@ export async function getDatasetItemById<
               status: true,
               createdAt: true,
               updatedAt: true,
-              sysId: true,
+              validFrom: true,
             },
         where: {
           id: props.datasetItemId,
@@ -1337,7 +1336,7 @@ export async function getDatasetItemById<
               status: true,
               createdAt: true,
               updatedAt: true,
-              sysId: true,
+              validFrom: true,
             },
         where: {
           id: props.datasetItemId,
@@ -1445,7 +1444,7 @@ export async function getDatasetItemsByLatest<
             status: true,
             createdAt: true,
             updatedAt: true,
-            sysId: true,
+            validFrom: true,
           };
 
       const items = await prisma.datasetItem.findMany({
