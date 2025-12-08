@@ -285,9 +285,13 @@ export async function upsertDatasetItem(
     existingItem = await getDatasetItemById({
       projectId: props.projectId,
       datasetItemId: props.datasetItemId,
-      datasetId: dataset.id,
       status: "ALL",
     });
+    if (!!existingItem && existingItem.datasetId !== dataset.id) {
+      throw new LangfuseNotFoundError(
+        `Dataset item with id ${props.datasetItemId} not found for project ${props.projectId}`,
+      );
+    }
   }
 
   // 3. Merge incoming data with existing data
